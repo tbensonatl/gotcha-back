@@ -8,7 +8,7 @@
 void FftShiftGpu(cuComplex *data, int num_samples, int num_arrays,
                  cudaStream_t stream);
 
-size_t GetBackprojWorkBufSizeBytes(SarGpuKernel kernel, int num_range_bins);
+size_t GetMaxBackprojWorkBufSizeBytes(int num_range_bins);
 
 void SarBpGpu(cuComplex *image, int image_width, int image_height,
               const cuComplex *range_profiles, uint8_t *bp_workbuf,
@@ -18,9 +18,13 @@ void SarBpGpu(cuComplex *image, int image_width, int image_height,
 
 size_t GetMaxMagnitudeWorkBufSizeBytes(int image_height);
 
-void ComputeMagnitudeImage(uint *dest_image, float *max_magnitude_workbuf,
+void ComputeMagnitudeImage(uint32_t *dest_image, float *max_magnitude_workbuf,
                            const cuComplex *src_image, int image_width,
                            int image_height, float min_normalized_db,
                            cudaStream_t stream);
+
+void ResampleMagnitudeImage(uint32_t *resampled, const uint32_t *src_image,
+                            int resample_width, int resample_height,
+                            int src_width, int src_height, cudaStream_t stream);
 
 #endif /* _KERNELS_H_ */

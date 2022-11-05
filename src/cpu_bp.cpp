@@ -10,7 +10,7 @@ void cpu_sar_bp(std::vector<cuComplex> &image, int image_width,
 
     const double dr_inv = 1.0 / dr;
     for (iy = 0; iy < image_height; ++iy) {
-        const double py = (-image_height / 2.0 + 0.5 + iy) * dy;
+        const double py = (image_height / 2.0 - 0.5 - iy) * dy;
         for (ix = 0; ix < image_width; ++ix) {
             cuDoubleComplex accum = make_cuDoubleComplex(0.0, 0.0);
             const double px = (-image_width / 2.0 + 0.5 + ix) * dx;

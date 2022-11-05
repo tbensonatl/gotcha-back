@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <thread>
 
 #include <boost/program_options.hpp>
 
@@ -18,6 +19,8 @@
 #include "kernels.h"
 #include "ser.h"
 #include "video_sar.h"
+
+#include "sar_ui.h"
 
 namespace po = boost::program_options;
 namespace fs = std::filesystem;
@@ -145,7 +148,7 @@ static void runGpu(std::vector<cuComplex> &image, const ReconParams &params,
                            sizeof(float3) * data_set.num_pulses));
 
     const size_t bp_workbuf_bytes =
-        GetBackprojWorkBufSizeBytes(params.kernel, num_range_bins);
+        GetMaxBackprojWorkBufSizeBytes(num_range_bins);
     uint8_t *dev_bp_workbuf = nullptr;
     if (bp_workbuf_bytes > 0) {
         cudaChecked(cudaMalloc((void **)&dev_bp_workbuf, bp_workbuf_bytes));
@@ -254,6 +257,8 @@ static void readGoldImage(std::vector<cuComplex> &image,
     }
 }
 
+void runUI(SarUI &ui) { ui.StartEventLoop(); }
+
 int main(int argc, char **argv) {
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "help message")(
@@ -336,7 +341,7 @@ int main(int argc, char **argv) {
         .gotcha_dir = gotcha_dir,
         .image_width = 1024,
         .image_height = 1024,
-        .az_degrees_per_image = 20,
+        .az_degrees_per_image = 10,
         .pass = pass,
         .kernel = selected_kernel,
     };
@@ -370,7 +375,15 @@ int main(int argc, char **argv) {
 
     try {
         if (vm.count("video")) {
-            runVideo(video_params, argc, argv, vm["video"].as<int>());
+            const int WINDOW_INITIAL_WIDTH = 512;
+            const int WINDOW_INITIAL_HEIGHT = 512;
+            SarUI ui(WINDOW_INITIAL_WIDTH, WINDOW_INITIAL_HEIGHT);
+            std::thread ui_thread(&SarUI::StartEventLoop, &ui);
+            VideoSar sar(video_params, vm["video"].as<int>(), ui);
+            std::thread sar_thread(&VideoSar::Run, &sar);
+            ui_thread.join();
+            sar.Stop();
+            sar_thread.join();
         } else if (vm.count("gpu")) {
             runGpu(image, recon_params, vm["gpu"].as<int>());
         } else {
@@ -391,22 +404,25 @@ int main(int argc, char **argv) {
         LOG("Signal-to-error ratio:\t\t\t%.2f dB", ser);
     }
 
-    fs::path output_file = vm["output-file"].as<std::string>();
-    std::ofstream outfile(output_file.string().c_str(),
-                          std::ios::out | std::ios::binary);
-    LOG("Writing output to %s", output_file.string().c_str());
-    if (outfile.is_open()) {
-        outfile.write(reinterpret_cast<const char *>(&image[0]),
-                      sizeof(cuComplex) * num_pixels);
-        if (outfile.bad()) {
-            LOG_ERR("Failed to write image to %s",
+    if (!vm.count("video")) {
+        fs::path output_file = vm["output-file"].as<std::string>();
+        std::ofstream outfile(output_file.string().c_str(),
+                              std::ios::out | std::ios::binary);
+        LOG("Writing output to %s", output_file.string().c_str());
+        if (outfile.is_open()) {
+            outfile.write(reinterpret_cast<const char *>(&image[0]),
+                          sizeof(cuComplex) * num_pixels);
+            if (outfile.bad()) {
+                LOG_ERR("Failed to write image to %s",
+                        output_file.string().c_str());
+                exit_code = EXIT_FAILURE;
+            }
+            outfile.close();
+        } else {
+            LOG_ERR("Failed to open %s for writing",
                     output_file.string().c_str());
             exit_code = EXIT_FAILURE;
         }
-        outfile.close();
-    } else {
-        LOG_ERR("Failed to open %s for writing", output_file.string().c_str());
-        exit_code = EXIT_FAILURE;
     }
 
     return exit_code;

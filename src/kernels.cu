@@ -37,7 +37,7 @@ SarBpKernelDoublePrecision(cuComplex *image, int image_width, int image_height,
         return;
     }
 
-    const double py = (-image_height / 2.0 + 0.5 + iy) * dy;
+    const double py = (image_height / 2.0 - 0.5 - iy) * dy;
     const double px = (-image_width / 2.0 + 0.5 + ix) * dx;
 
     cuDoubleComplex accum = make_cuDoubleComplex(0.0, 0.0);
@@ -97,7 +97,7 @@ SarBpKernelMixedPrecision(cuComplex *image, int image_width, int image_height,
         return;
     }
 
-    const double py = (-image_height / 2.0 + 0.5 + iy) * dy;
+    const double py = (image_height / 2.0 - 0.5 - iy) * dy;
     const double px = (-image_width / 2.0 + 0.5 + ix) * dx;
 
     cuComplex accum = make_cuComplex(0.0, 0.0);
@@ -155,7 +155,7 @@ SarBpKernelSmemRange(cuComplex *image, int image_width, int image_height,
     const double xmid = (-image_width / 2.0 + 0.5 + blockIdx.x * blockDim.x +
                          blockDim.x / 2.0) *
                         dx;
-    const double ymid = (-image_height / 2.0 + 0.5 + blockIdx.y * blockDim.y +
+    const double ymid = (image_height / 2.0 - 0.5 - blockIdx.y * blockDim.y -
                          blockDim.y / 2.0) *
                         dy;
     const float3 central_pulse_pos = ant_pos[num_pulses / 2];
@@ -188,8 +188,8 @@ SarBpKernelSmemRange(cuComplex *image, int image_width, int image_height,
         return;
     }
 
-    const float xdel = (-image_width / 2.0 + 0.5 + ix) * dx - xmid;
-    const float ydel = (-image_height / 2.0 + 0.5 + iy) * dy - ymid;
+    const float xdel = (-image_width / 2.0f + 0.5f + ix) * dx - xmid;
+    const float ydel = (image_height / 2.0f - 0.5f - iy) * dy - ymid;
     const double dist_adj =
         2.0 * xmid * xdel + xdel * xdel + 2.0 * ymid * ydel + ydel * ydel;
 
@@ -253,7 +253,7 @@ SarBpKernelIncrPhaseLUT(cuComplex *image, int image_width, int image_height,
     const double xmid = (-image_width / 2.0 + 0.5 + blockIdx.x * blockDim.x +
                          blockDim.x / 2.0) *
                         dx;
-    const double ymid = (-image_height / 2.0 + 0.5 + blockIdx.y * blockDim.y +
+    const double ymid = (image_height / 2.0 - 0.5 - blockIdx.y * blockDim.y -
                          blockDim.y / 2.0) *
                         dy;
     const float3 central_pulse_pos = ant_pos[num_pulses / 2];
@@ -289,7 +289,7 @@ SarBpKernelIncrPhaseLUT(cuComplex *image, int image_width, int image_height,
     }
 
     const float xdel = (-image_width / 2.0 + 0.5 + ix) * dx - xmid;
-    const float ydel = (-image_height / 2.0 + 0.5 + iy) * dy - ymid;
+    const float ydel = (image_height / 2.0 - 0.5 - iy) * dy - ymid;
     const double dist_adj =
         2.0 * xmid * xdel + xdel * xdel + 2.0 * ymid * ydel + ydel * ydel;
 
@@ -350,7 +350,7 @@ SarBpKernelSinglePrecision(cuComplex *image, int image_width, int image_height,
         return;
     }
 
-    const float py = (-image_height / 2.0f + 0.5f + iy) * dy;
+    const float py = (image_height / 2.0f - 0.5f - iy) * dy;
     const float px = (-image_width / 2.0f + 0.5f + ix) * dx;
 
     cuComplex accum = make_cuComplex(0.0f, 0.0f);
@@ -454,7 +454,7 @@ __global__ void FindMaxMagnitudePhaseTwoKernel(float *max_magnitude_workbuf,
     }
 }
 
-__global__ void ComputeMagnitudeImageKernel(uint *dest_image,
+__global__ void ComputeMagnitudeImageKernel(uint32_t *dest_image,
                                             const cuComplex *src_image,
                                             int image_width, int image_height,
                                             const float *max_magnitude,
@@ -481,6 +481,58 @@ __global__ void ComputeMagnitudeImageKernel(uint *dest_image,
     }
 }
 
+__global__ void ResampleMagnitudeImageKernel(uint32_t *resampled,
+                                             const uint32_t *src_image,
+                                             int resample_width,
+                                             int resample_height, int src_width,
+                                             int src_height) {
+    const int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const int iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (ix >= resample_width || iy >= resample_height) {
+        return;
+    }
+
+    const float x = static_cast<float>(ix) * src_width / resample_width;
+    const float y = static_cast<float>(iy) * src_height / resample_height;
+
+    const float xf = floorf(x);
+    const float yf = floorf(y);
+
+    const float x_alpha = x - xf;
+    const float y_alpha = y - yf;
+
+    const int sx = (int)xf;
+    const int sy = (int)yf;
+
+    const float w1 = (1.0f - x_alpha) * (1.0f - y_alpha);
+    const float w2 = x_alpha * (1.0f - y_alpha);
+    const float w3 = (1.0f - x_alpha) * y_alpha;
+    const float w4 = x_alpha * y_alpha;
+
+    union rgba {
+        uint32_t u32;
+        uint8_t u8[4];
+    };
+    rgba p1, p2, p3, p4;
+
+    const int base_ind = sy * src_width + sx;
+    p1.u32 = src_image[base_ind];
+    p2.u32 = (sx < src_width - 1) ? src_image[base_ind + 1] : 0;
+    p3.u32 = (sy < src_height - 1) ? src_image[base_ind + src_width] : 0;
+    p4.u32 = (sx < src_width - 1 && sy < src_height - 1)
+                 ? src_image[base_ind + src_width + 1]
+                 : 0;
+    rgba accum = {.u32 = 0};
+    for (int k = 0; k < 3; k++) {
+        const float val =
+            w1 * p1.u8[k] + w2 * p2.u8[k] + w3 * p3.u8[k] + w4 * p4.u8[k];
+        accum.u8[k] = (val < 0.0f) ? 0 : (val >= 255.0f) ? 255 : roundf(val);
+    }
+    accum.u8[3] = 255;
+    resampled[iy * resample_width + ix] = accum.u32;
+}
+
 void FftShiftGpu(cuComplex *data, int num_samples, int num_arrays,
                  cudaStream_t stream) {
     const dim3 block(128, 1);
@@ -499,13 +551,13 @@ static int SelectedKernelPulseBlockSize(SarGpuKernel kernel, int num_pulses) {
     return num_pulses;
 }
 
-size_t GetBackprojWorkBufSizeBytes(SarGpuKernel kernel, int num_range_bins) {
-    switch (kernel) {
-    case SarGpuKernel::IncrPhaseLookup:
-        return sizeof(cuDoubleComplex) * num_range_bins;
-    default:
-        return 0;
-    }
+size_t GetMaxBackprojWorkBufSizeBytes(int num_range_bins) {
+    const size_t incr_phase_lookup_size =
+        sizeof(cuDoubleComplex) * num_range_bins;
+    // Currently, only the IncrPhaseLookup kernel requires a work buffer, but
+    // if we add additional kernels that require work buffers, we should return
+    // the max of them here.
+    return incr_phase_lookup_size;
 }
 
 __global__ void SarBpPopulateIncrPhaseLUT(cuComplex *workbuf,
@@ -660,4 +712,17 @@ void ComputeMagnitudeImage(uint *dest_image, float *max_magnitude_workbuf,
     ComputeMagnitudeImageKernel<<<grid, block, 0, stream>>>(
         dest_image, src_image, image_width, image_height, max_magnitude_workbuf,
         min_normalized_db);
+}
+
+void ResampleMagnitudeImage(uint32_t *resampled, const uint32_t *src_image,
+                            int resample_width, int resample_height,
+                            int src_width, int src_height,
+                            cudaStream_t stream) {
+    const dim3 block(16, 16);
+    const dim3 grid(idivup(resample_width, block.x),
+                    idivup(resample_height, block.y));
+    ResampleMagnitudeImageKernel<<<grid, block, 0, stream>>>(
+        resampled, src_image, resample_width, resample_height, src_width,
+        src_height);
+    cudaChecked(cudaGetLastError());
 }

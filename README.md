@@ -18,7 +18,7 @@ If you would like to discuss the project, please contact the author (Thomas Bens
 
 # Dependencies and Requirements
 
-Dependencies include CMake (3.17+), CUDA, Boost (only the `program_options` library), GLUT, OpenGL, and GLEW. Note that an NVIDIA GPU is required to run the GPU-based backprojectors (including the video SAR mode). To date, this code has been developed on Ubuntu 22.04 with CUDA 11.7, although other reasonably new Linux distributions should work as well.
+Dependencies include CMake (3.17+), CUDA, Boost (only the `program_options` library), and FLTK. Note that an NVIDIA GPU is required to run the GPU-based backprojectors (including the video SAR mode). To date, this code has been developed on Ubuntu 22.04 with CUDA 11.7, although other reasonably new Linux distributions should work as well.
 
 # Building the Code
 
@@ -62,9 +62,9 @@ There are various accuracy and performance trade-offs, especially related to the
 
 The `--ser <gold.bin>` argument computes a signal-to-error ratio in units of decibels between the generated image and `<gold.bin>`. One option is to use the CPU backprojector to generate an image, copy that image to `<gold.bin>`, and then e.g. run GPU backprojectors using `<gold.bin>` for validation. The gold image used in the SER calculation must be generated from the same pass and azimuth range or the error will be very large. For the SER metric, larger numbers are better, with values greater than 120 dB being near perfect matches. I typically aim for greater than 60 dB, although visually the images look reasonable with smaller SER values. However, it may be that applying e.g. coherent change detection requires higher accuracy.
 
-Finally, there is a video SAR mode (`--video <device-id>`) that generates a sequence of images from consecutive ranges of azimuth extents. These are displayed as a video via a simple texture mapping to a `GL_QUAD`. The video SAR mode is a work-in-progress. Currently, it uses OpenGL/GLEW/GLUT, but I would like to port it to Vulkan. Also, the intent is to add pulldown menus to allow switching parameters (kernels, pass, etc.). The video SAR mode is not yet optimized, other than letting you choose the kernel. Since the backprojection process is linear, other options are available, such as using a rolling window for accumulating backprojected images.
+Finally, there is a video SAR mode (`--video <device-id>`) that generates a sequence of images from consecutive ranges of azimuth extents. The video SAR mode is a work-in-progress. Currently, the window is draw via FLTK. There is a pulldown menu to choose the various GPU kernels. The video SAR mode is not yet optimized, other than letting you choose the kernel. Since the backprojection process is linear, other options are available, such as using a rolling window for accumulating backprojected images. Ultimately, the goal is to implement coherent change detection and overlay the coherence map from multiple passes on the SAR image.
 
-Below is a sample screenshot from the video SAR mode using 20 degrees of data.
+Below is a sample screenshot from the video SAR mode using 20 degrees of data (this window and the next is drawn using GLUT rather than the current FLTK).
 
 ![Video SAR 20 degrees](figs/video_sar_20deg.png)
 
@@ -74,7 +74,7 @@ Using all 360 degrees of data, we get the following image.
 
 ![Video SAR 360 degrees](figs/video_sar_360deg.png)
 
-In this image, the top hat is clearly visible as the bright circular object.
+In this image, the top hat is clearly visible as the bright circular object. The reconstructed image is normally resampled to the window dimensions via bilinear interpolation. Immediately after resizing a window, the image will be resampled via nearest neighbor interpolation to reduce the lag in drawing the window, but future interpolations to that window size will be done using bilinear interpolation.
 
 # Kernel Selection Options
 
@@ -94,11 +94,11 @@ The performance metric computed by the code is giga backprojections per second. 
 
 | Kernel  | SER (dB) | Giga Backprojections Per Second |
 | ------------- | ------------- | ------------- |
-| 1 (FP64) | 126.35 | 1.32 |
-| 2 (Mixed) | 85.28 | 1.67 |
-| 3 (smem pre-computations) | 85.23 | 2.55 |
-| 4 (Newton-Raphson + incr. phase calcs) | 88.17 | 5.35 |
-| 5 (single precision) | 13.72 | 69.58
+| 1 (FP64) | 124.64 | 1.32 |
+| 2 (Mixed) | 81.10 | 1.67 |
+| 3 (smem pre-computations) | 80.96 | 2.55 |
+| 4 (Newton-Raphson + incr. phase calcs) | 82.05 | 5.35 |
+| 5 (single precision) | 13.99 | 69.58
 
 The RTX 3060 has 1/64th double precision throughput and we can see a ~52x difference between the FP64 and FP32 implementations. However, the SER value for the single precision is likely too low for many tasks, although it is visually still reasonable. The currently implemented optimizations close the performance gap between a version with high accuracy and the FP32 version to about 13x.
 
@@ -108,6 +108,5 @@ There are several items still to be done, including:
 
 - More optimization work on the kernels, including texture-based interpolations, thread coarsening, cache hierarchy optimization, etc.
 - The video SAR mode can also be significantly optimized, especially in the case of subsequent images using partially overlapping pulse ranges. Since multiple passes are available, simultaneously constructing data from multiple passes and performing on-the-fly coherent change detection is also an option.
-- Learn enough Vulkan to switch to that instead of OpenGL.
 
 Also, the current data sets are quite small as they are pre-processed to a small scene. If anyone has any large interesting SAR data sets available that they are willing to share, please contact me at tbensongit@gmail.com.

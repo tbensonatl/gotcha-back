@@ -46,6 +46,10 @@ struct VideoParams {
     int image_width{1024};
     // Image height in pixels
     int image_height{1024};
+    // Maximum screen width in pixels
+    int max_screen_width{2048};
+    // Maximum screen height in pixels
+    int max_screen_height{2048};
     // Image field of view (meters)
     float image_field_of_view_m{125.0f};
     // Phase history upsampling factor

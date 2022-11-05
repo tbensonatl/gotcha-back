@@ -5,9 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 
 find_package(CUDAToolkit REQUIRED)
 find_package(Boost COMPONENTS program_options REQUIRED)
-find_package(GLUT REQUIRED)
-find_package(OpenGL REQUIRED)
-find_package(GLEW REQUIRED)
+set(FLTK_SKIP_OPENGL 1)
+set(FLTK_SKIP_FORMS 1)
+find_package(FLTK REQUIRED)
 
 set(DEFAULT_BUILD_TYPE "Release")
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -48,6 +48,8 @@ set(CPP_SOURCES
     src/fft.cpp
     src/helpers.h
     src/helpers.cpp
+    src/sar_ui.h
+    src/sar_ui.cpp
     src/ser.h
     src/ser.cpp
     src/video_sar.h
@@ -57,4 +59,4 @@ add_executable(sarbp src/main.cpp ${CPP_SOURCES})
 set_target_properties(sarbp PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(sarbp PROPERTIES CUDA_ARCHITECTURES "86")
 target_include_directories(sarbp PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES} ${Boost_INCLUDE_DIRS})
-target_link_libraries(sarbp kernels ${Boost_LIBRARIES} CUDA::cufft ${GLUT_LIBRARIES} OpenGL::GL OpenGL::GLU GLEW::glew)
+target_link_libraries(sarbp kernels ${Boost_LIBRARIES} CUDA::cufft ${FLTK_LIBRARIES})
