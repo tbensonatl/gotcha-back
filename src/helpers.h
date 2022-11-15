@@ -10,6 +10,24 @@
 #define cudaChecked(err) __cudaChecked(err, __FILE__, __LINE__)
 #define cufftChecked(err) __cufftChecked(err, __FILE__, __LINE__)
 
+#define FREE_AND_NULL_CUDA_PINNED_ALLOC(ptr)                                   \
+    if (ptr) {                                                                 \
+        cudaFreeHost(ptr);                                                     \
+        ptr = nullptr;                                                         \
+    }
+
+#define FREE_AND_NULL_CUDA_DEV_ALLOC(ptr)                                      \
+    if (ptr) {                                                                 \
+        cudaFree(ptr);                                                         \
+        ptr = nullptr;                                                         \
+    }
+
+#define FREE_AND_ZERO_CUFFT_HANDLE(handle)                                     \
+    if (handle) {                                                              \
+        cufftDestroy(handle);                                                  \
+        handle = 0;                                                            \
+    }
+
 void __log(const char *fmt, ...);
 void __logErr(const char *file, int line, const char *fmt, ...);
 

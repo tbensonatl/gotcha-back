@@ -17,10 +17,11 @@
 #include "fft.h"
 #include "helpers.h"
 #include "kernels.h"
+#include "range_upsampling_gpu.h"
+#include "sar_bp_gpu.h"
+#include "sar_ui.h"
 #include "ser.h"
 #include "video_sar.h"
-
-#include "sar_ui.h"
 
 namespace po = boost::program_options;
 namespace fs = std::filesystem;
@@ -138,21 +139,17 @@ static void runGpu(std::vector<cuComplex> &image, const ReconParams &params,
         "bins.",
         data_set.num_pulses, data_set.num_freq, num_range_bins);
 
-    cuComplex *dev_range_profiles = nullptr, *dev_image = nullptr;
-    cudaChecked(
-        cudaMalloc((void **)&dev_range_profiles,
-                   data_set.num_pulses * num_range_bins * sizeof(cuComplex)));
-    cudaChecked(cudaMalloc((void **)&dev_image, Nx * Ny * sizeof(cuComplex)));
+    cudaStream_t stream;
+    cudaChecked(cudaStreamCreate(&stream));
+
+    RangeUpsamplingGpu range_upsampling(data_set.num_freq, num_range_bins,
+                                        data_set.num_pulses, stream);
+
+    SarBpGpu bp(num_range_bins, Nx * Ny, stream);
+
     float3 *dev_ant_pos = nullptr;
     cudaChecked(cudaMalloc((void **)&dev_ant_pos,
                            sizeof(float3) * data_set.num_pulses));
-
-    const size_t bp_workbuf_bytes =
-        GetMaxBackprojWorkBufSizeBytes(num_range_bins);
-    uint8_t *dev_bp_workbuf = nullptr;
-    if (bp_workbuf_bytes > 0) {
-        cudaChecked(cudaMalloc((void **)&dev_bp_workbuf, bp_workbuf_bytes));
-    }
 
     const int num_pulses = data_set.num_pulses;
     const int num_freq = data_set.num_freq;
@@ -168,47 +165,20 @@ static void runGpu(std::vector<cuComplex> &image, const ReconParams &params,
            sizeof(cuComplex) * num_pulses * num_freq);
     memcpy(ant_pos, &data_set.ant_pos[0], sizeof(float3) * num_pulses);
 
-    cudaStream_t stream;
-    cufftHandle fft_plan;
-
-    cudaChecked(cudaStreamCreate(&stream));
-    cufftChecked(
-        cufftPlan1d(&fft_plan, num_range_bins, CUFFT_C2C, data_set.num_pulses));
-    cufftChecked(cufftSetStream(fft_plan, stream));
-
     cudaChecked(cudaMemcpyAsync(dev_ant_pos, ant_pos,
                                 sizeof(float3) * data_set.num_pulses,
                                 cudaMemcpyHostToDevice, stream));
-    cudaChecked(cudaMemcpy2DAsync(
-        dev_range_profiles, sizeof(cufftComplex) * num_range_bins,
-        phase_history, sizeof(cufftComplex) * data_set.num_freq,
-        sizeof(cufftComplex) * data_set.num_freq, data_set.num_pulses,
-        cudaMemcpyHostToDevice, stream));
-    cudaChecked(cudaMemset2DAsync(dev_range_profiles + data_set.num_freq,
-                                  sizeof(cuComplex) * num_range_bins, 0,
-                                  sizeof(cuComplex) *
-                                      (num_range_bins - data_set.num_freq),
-                                  data_set.num_pulses, stream));
-    cudaChecked(
-        cudaMemsetAsync(dev_image, 0, sizeof(cuComplex) * Nx * Ny, stream));
 
-    cufftChecked(cufftExecC2C(fft_plan, dev_range_profiles, dev_range_profiles,
-                              CUFFT_INVERSE));
-    FftShiftGpu(dev_range_profiles, num_range_bins, data_set.num_pulses,
-                stream);
-
-    const double c = SPEED_OF_LIGHT_M_PER_SEC;
-    const double max_wr = c / (2.0 * data_set.del_freq);
-    const double dx = params.image_field_of_view_m / Nx;
-    const double dy = params.image_field_of_view_m / Ny;
-    const double dr = max_wr / num_range_bins;
+    const cuComplex *dev_range_profiles =
+        range_upsampling.Upsample(phase_history);
 
     cudaChecked(cudaStreamSynchronize(stream));
     const auto t1 = std::chrono::steady_clock::now();
 
-    SarBpGpu(dev_image, Nx, Ny, dev_range_profiles, dev_bp_workbuf,
-             num_range_bins, data_set.num_pulses, dev_ant_pos,
-             data_set.min_freq, dr, dx, dy, 0.0f, params.kernel, stream);
+    const cuComplex *dev_image =
+        bp.Backproject(dev_range_profiles, dev_ant_pos, Nx, Ny,
+                       data_set.num_pulses, params.image_field_of_view_m,
+                       data_set.min_freq, data_set.del_freq, params.kernel);
 
     cudaChecked(cudaStreamSynchronize(stream));
     const auto t2 = std::chrono::steady_clock::now();
@@ -227,14 +197,8 @@ static void runGpu(std::vector<cuComplex> &image, const ReconParams &params,
 
     memcpy(&image[0], pinned_image, sizeof(cuComplex) * Nx * Ny);
 
-    cufftDestroy(fft_plan);
     cudaStreamDestroy(stream);
-    if (dev_bp_workbuf != nullptr) {
-        cudaFree(dev_bp_workbuf);
-    }
     cudaFree(dev_ant_pos);
-    cudaFree(dev_image);
-    cudaFree(dev_range_profiles);
     cudaFreeHost(ant_pos);
     cudaFreeHost(pinned_image);
     cudaFreeHost(phase_history);

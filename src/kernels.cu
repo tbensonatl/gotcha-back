@@ -612,11 +612,11 @@ static void PopulateBpWorkbuf(uint8_t *bp_workbuf, int num_range_bins,
     s_did_init_phase_lut = true;
 }
 
-void SarBpGpu(cuComplex *image, int image_width, int image_height,
-              const cuComplex *range_profiles, uint8_t *bp_workbuf,
-              int num_range_bins, int num_pulses, const float3 *ant_pos,
-              double freq_min, double dR, double dx, double dy, double z0,
-              SarGpuKernel kernel, cudaStream_t stream) {
+void SarBpGpuWrapper(cuComplex *image, int image_width, int image_height,
+                     const cuComplex *range_profiles, uint8_t *bp_workbuf,
+                     int num_range_bins, int num_pulses, const float3 *ant_pos,
+                     double freq_min, double dR, double dx, double dy,
+                     double z0, SarGpuKernel kernel, cudaStream_t stream) {
     const dim3 block(16, 16);
     const dim3 grid(idivup(image_width, block.x), idivup(image_height, block.y),
                     1);

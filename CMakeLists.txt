@@ -48,6 +48,10 @@ set(CPP_SOURCES
     src/fft.cpp
     src/helpers.h
     src/helpers.cpp
+    src/range_upsampling_gpu.h
+    src/range_upsampling_gpu.cpp
+    src/sar_bp_gpu.h
+    src/sar_bp_gpu.cpp
     src/sar_ui.h
     src/sar_ui.cpp
     src/ser.h

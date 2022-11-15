@@ -158,26 +158,26 @@ void VideoSar::Render(int screen_width, int screen_height) {
     const float dR = maxWr / m_num_upsampled_bins;
 
     if (first_pulse_this_img + n_pulses_this_img <= n_pulses) {
-        SarBpGpu(m_dev.image, nx, ny,
-                 m_dev.range_profiles +
-                     first_pulse_this_img * m_num_upsampled_bins,
-                 m_dev.bp_workbuf, m_num_upsampled_bins, n_pulses_this_img,
-                 m_dev.ant_pos + first_pulse_this_img, m_data_set.min_freq, dR,
-                 dx, dy, 0.0f, m_params.kernel, m_stream);
+        SarBpGpuWrapper(
+            m_dev.image, nx, ny,
+            m_dev.range_profiles + first_pulse_this_img * m_num_upsampled_bins,
+            m_dev.bp_workbuf, m_num_upsampled_bins, n_pulses_this_img,
+            m_dev.ant_pos + first_pulse_this_img, m_data_set.min_freq, dR, dx,
+            dy, 0.0f, m_params.kernel, m_stream);
     } else {
-        SarBpGpu(m_dev.image, nx, ny,
-                 m_dev.range_profiles +
-                     first_pulse_this_img * m_num_upsampled_bins,
-                 m_dev.bp_workbuf, m_num_upsampled_bins,
-                 n_pulses - first_pulse_this_img,
-                 m_dev.ant_pos + first_pulse_this_img, m_data_set.min_freq, dR,
-                 dx, dy, 0.0f, m_params.kernel, m_stream);
+        SarBpGpuWrapper(
+            m_dev.image, nx, ny,
+            m_dev.range_profiles + first_pulse_this_img * m_num_upsampled_bins,
+            m_dev.bp_workbuf, m_num_upsampled_bins,
+            n_pulses - first_pulse_this_img,
+            m_dev.ant_pos + first_pulse_this_img, m_data_set.min_freq, dR, dx,
+            dy, 0.0f, m_params.kernel, m_stream);
         const int pulses_remaining =
             n_pulses_this_img - (n_pulses - first_pulse_this_img);
-        SarBpGpu(m_dev.image, nx, ny, m_dev.range_profiles, m_dev.bp_workbuf,
-                 m_num_upsampled_bins, pulses_remaining, m_dev.ant_pos,
-                 m_data_set.min_freq, dR, dx, dy, 0.0f, m_params.kernel,
-                 m_stream);
+        SarBpGpuWrapper(m_dev.image, nx, ny, m_dev.range_profiles,
+                        m_dev.bp_workbuf, m_num_upsampled_bins,
+                        pulses_remaining, m_dev.ant_pos, m_data_set.min_freq,
+                        dR, dx, dy, 0.0f, m_params.kernel, m_stream);
     }
 
     const float min_normalized_db = -70;
