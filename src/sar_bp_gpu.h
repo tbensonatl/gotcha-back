@@ -14,26 +14,27 @@ class SarBpGpu {
     SarBpGpu(const SarBpGpu &) = delete;
     SarBpGpu &operator=(const SarBpGpu &) = delete;
 
-    SarBpGpu(int num_range_bins, int max_image_num_pixels, cudaStream_t stream);
+    SarBpGpu(int num_range_bins);
     ~SarBpGpu();
 
-    // Backproject does not synchronize the stream
-    const cuComplex *Backproject(const cuComplex *dev_range_profiles,
-                                 const float3 *dev_ant_pos, int image_width,
-                                 int image_height, int num_pulses,
-                                 float image_fov_m, float min_freq,
-                                 float del_freq, SarGpuKernel kernel);
+    // Backproject num_pulses x m_num_range_bins pulses from dev_range_profiles
+    // into dev_image cooresponding to antenna positions dev_ant_pos. The output
+    // image has pixel dimensions image_width x image_height and physical
+    // dimensions image_fov_m x image_fov_m meters. The image is not zeroed out
+    // prior to backprojection so that pulses can be accumulated with multiple
+    // calls to Backproject. stream is not synchronized in this method, so the
+    // backprojection will likely not be complete yet when this method returns.
+    void Backproject(cuComplex *dev_image, const cuComplex *dev_range_profiles,
+                     const float3 *dev_ant_pos, int image_width,
+                     int image_height, int num_pulses, float image_fov_m,
+                     float min_freq, float del_freq, SarGpuKernel kernel,
+                     cudaStream_t stream);
 
   private:
     int m_num_range_bins;
-    int m_max_image_num_pixels;
 
     // Device buffers
     uint8_t *m_dev_workbuf{nullptr};
-    cuComplex *m_dev_image{nullptr};
-
-    // m_stream is not owned by this class
-    cudaStream_t m_stream;
 };
 
 #endif // _SAR_BP_GPU_H_

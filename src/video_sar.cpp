@@ -29,16 +29,12 @@ VideoSar::VideoSar(const VideoParams &params, int device_id, SarUI &ui)
 
 void VideoSar::FreeCudaBuffers() {
     cudaStreamDestroy(m_stream);
-    cufftDestroy(m_fft_plan);
     cudaFreeHost(m_pinned.ant_pos);
     cudaFreeHost(m_pinned.image);
     cudaFreeHost(m_pinned.phase_history);
     cudaFreeHost(m_pinned.display_image);
     cudaFree(m_dev.max_magnitude_workbuf);
     cudaFree(m_dev.ant_pos);
-    if (m_dev.bp_workbuf) {
-        cudaFree(m_dev.bp_workbuf);
-    }
     cudaFree(m_dev.image);
     cudaFree(m_dev.magnitude_image);
     cudaFree(m_dev.resampled_magnitude_image);
@@ -86,11 +82,6 @@ void VideoSar::InitCudaBuffers() {
                            sizeof(uint32_t) * nx * ny));
     cudaChecked(cudaMalloc((void **)&m_dev.resampled_magnitude_image,
                            sizeof(uint32_t) * max_nx * max_ny));
-    const size_t bp_workbuf_bytes =
-        GetMaxBackprojWorkBufSizeBytes(m_num_upsampled_bins);
-    if (bp_workbuf_bytes > 0) {
-        cudaChecked(cudaMalloc((void **)&m_dev.bp_workbuf, bp_workbuf_bytes));
-    }
 
     cudaChecked(cudaMallocHost((void **)&m_pinned.phase_history,
                                n_pulses * n_freq * sizeof(cuComplex)));
@@ -106,9 +97,10 @@ void VideoSar::InitCudaBuffers() {
     memcpy(m_pinned.ant_pos, &m_data_set.ant_pos[0], sizeof(float3) * n_pulses);
 
     cudaChecked(cudaStreamCreate(&m_stream));
-    cufftChecked(
-        cufftPlan1d(&m_fft_plan, m_num_upsampled_bins, CUFFT_C2C, n_pulses));
-    cufftChecked(cufftSetStream(m_fft_plan, m_stream));
+
+    m_bp.reset(new SarBpGpu(m_num_upsampled_bins));
+    m_range_upsampling.reset(
+        new RangeUpsamplingGpu(m_num_upsampled_bins, n_pulses));
 }
 
 void VideoSar::Render(int screen_width, int screen_height) {
@@ -130,54 +122,34 @@ void VideoSar::Render(int screen_width, int screen_height) {
         cudaChecked(cudaMemcpyAsync(m_dev.ant_pos, m_pinned.ant_pos,
                                     sizeof(float3) * n_pulses,
                                     cudaMemcpyHostToDevice, m_stream));
-        cudaChecked(cudaMemcpy2DAsync(
-            m_dev.range_profiles, sizeof(cufftComplex) * m_num_upsampled_bins,
-            m_pinned.phase_history, sizeof(cufftComplex) * n_freq,
-            sizeof(cufftComplex) * n_freq, n_pulses, cudaMemcpyHostToDevice,
-            m_stream));
-        cudaChecked(cudaMemset2DAsync(
-            m_dev.range_profiles + n_freq,
-            sizeof(cuComplex) * m_num_upsampled_bins, 0,
-            sizeof(cuComplex) * (m_num_upsampled_bins - n_freq), n_pulses,
-            m_stream));
-        cufftChecked(cufftExecC2C(m_fft_plan, m_dev.range_profiles,
-                                  m_dev.range_profiles, CUFFT_INVERSE));
-        FftShiftGpu(m_dev.range_profiles, m_num_upsampled_bins, n_pulses,
-                    m_stream);
+        m_range_upsampling->Upsample(m_dev.range_profiles,
+                                     m_pinned.phase_history, n_freq, m_stream);
         have_copied_data = true;
     }
 
     cudaChecked(
         cudaMemsetAsync(m_dev.image, 0, sizeof(cuComplex) * nx * ny, m_stream));
 
-    const double c = SPEED_OF_LIGHT_M_PER_SEC;
-    const float maxWr = static_cast<float>(c / (2.0 * m_data_set.del_freq));
     const float image_field_of_view_m = 150.0f;
-    const float dx = image_field_of_view_m / nx;
-    const float dy = image_field_of_view_m / ny;
-    const float dR = maxWr / m_num_upsampled_bins;
 
-    if (first_pulse_this_img + n_pulses_this_img <= n_pulses) {
-        SarBpGpuWrapper(
-            m_dev.image, nx, ny,
-            m_dev.range_profiles + first_pulse_this_img * m_num_upsampled_bins,
-            m_dev.bp_workbuf, m_num_upsampled_bins, n_pulses_this_img,
-            m_dev.ant_pos + first_pulse_this_img, m_data_set.min_freq, dR, dx,
-            dy, 0.0f, m_params.kernel, m_stream);
-    } else {
-        SarBpGpuWrapper(
-            m_dev.image, nx, ny,
-            m_dev.range_profiles + first_pulse_this_img * m_num_upsampled_bins,
-            m_dev.bp_workbuf, m_num_upsampled_bins,
-            n_pulses - first_pulse_this_img,
-            m_dev.ant_pos + first_pulse_this_img, m_data_set.min_freq, dR, dx,
-            dy, 0.0f, m_params.kernel, m_stream);
-        const int pulses_remaining =
-            n_pulses_this_img - (n_pulses - first_pulse_this_img);
-        SarBpGpuWrapper(m_dev.image, nx, ny, m_dev.range_profiles,
-                        m_dev.bp_workbuf, m_num_upsampled_bins,
-                        pulses_remaining, m_dev.ant_pos, m_data_set.min_freq,
-                        dR, dx, dy, 0.0f, m_params.kernel, m_stream);
+    // If this image require pulses that wrap around back to 0 in azimuth,
+    // then split the backprojection into two parts
+    const int n_pulses_this_bp =
+        (first_pulse_this_img + n_pulses_this_img <= n_pulses)
+            ? n_pulses_this_img
+            : n_pulses - first_pulse_this_img;
+    m_bp->Backproject(
+        m_dev.image,
+        m_dev.range_profiles + first_pulse_this_img * m_num_upsampled_bins,
+        m_dev.ant_pos + first_pulse_this_img, nx, ny, n_pulses_this_bp,
+        image_field_of_view_m, m_data_set.min_freq, m_data_set.del_freq,
+        m_params.kernel, m_stream);
+    const int pulses_remaining = n_pulses_this_img - n_pulses_this_bp;
+    if (pulses_remaining > 0) {
+        m_bp->Backproject(m_dev.image, m_dev.range_profiles, m_dev.ant_pos, nx,
+                          ny, pulses_remaining, image_field_of_view_m,
+                          m_data_set.min_freq, m_data_set.del_freq,
+                          m_params.kernel, m_stream);
     }
 
     const float min_normalized_db = -70;

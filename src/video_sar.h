@@ -2,11 +2,14 @@
 #define _VIDEO_SAR_
 
 #include <filesystem>
+#include <memory>
 
 #include <cuda_runtime.h>
 
 #include "common.h"
 #include "data_reader.h"
+#include "range_upsampling_gpu.h"
+#include "sar_bp_gpu.h"
 #include "sar_ui.h"
 
 class VideoSar {
@@ -23,6 +26,8 @@ class VideoSar {
   private:
     SarUI &m_ui;
     SarGpuKernel m_kernel;
+    std::unique_ptr<SarBpGpu> m_bp;
+    std::unique_ptr<RangeUpsamplingGpu> m_range_upsampling;
     VideoParams m_params;
     Gotcha::DataBlock m_data_set;
 
@@ -37,7 +42,6 @@ class VideoSar {
         cuComplex *image{nullptr};
         float3 *ant_pos{nullptr};
         float *max_magnitude_workbuf{nullptr};
-        uint8_t *bp_workbuf{nullptr};
         uint32_t *magnitude_image{nullptr};
         uint32_t *resampled_magnitude_image{nullptr};
     } m_dev;
@@ -51,7 +55,6 @@ class VideoSar {
     } m_pinned;
 
     cudaStream_t m_stream;
-    cufftHandle m_fft_plan;
 
     void InitCudaBuffers();
     void FreeCudaBuffers();
