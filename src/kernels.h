@@ -10,8 +10,13 @@ void FftShiftGpu(cuComplex *data, int num_samples, int num_arrays,
 
 size_t GetMaxBackprojWorkBufSizeBytes(int num_range_bins);
 
+void ComputeRangeToCenterWrapper(double *dev_range_to_center,
+                                 const float3 *dev_ant_pos, int num_pulses,
+                                 cudaStream_t stream);
+
 void SarBpGpuWrapper(cuComplex *image, int image_width, int image_height,
-                     const cuComplex *range_profiles, uint8_t *bp_workbuf,
+                     const cuComplex *range_profiles,
+                     const double *range_to_center, uint8_t *bp_workbuf,
                      int num_range_bins, int num_pulses, const float3 *ant_pos,
                      double freq_min, double dr, double dx, double dy,
                      double z0, SarGpuKernel selected_kernel,

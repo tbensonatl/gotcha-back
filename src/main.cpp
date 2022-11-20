@@ -144,7 +144,7 @@ static void runGpu(std::vector<cuComplex> &image, const ReconParams &params,
 
     RangeUpsamplingGpu range_upsampling(num_range_bins, data_set.num_pulses);
 
-    SarBpGpu bp(num_range_bins);
+    SarBpGpu bp(num_range_bins, data_set.num_pulses);
 
     const int num_pulses = data_set.num_pulses;
     const int num_freq = data_set.num_freq;

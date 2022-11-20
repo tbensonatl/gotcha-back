@@ -9,8 +9,9 @@ enum class SarGpuKernel {
     Invalid = 0,
     DoublePrecision,
     MixedPrecision,
-    SmemRange,
     IncrPhaseLookup,
+    NewtonRaphsonTwoIter,
+    IncrRangeSmem,
     SinglePrecision
 };
 

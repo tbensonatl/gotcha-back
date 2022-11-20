@@ -82,25 +82,27 @@ The optimizations included thus far are a subset of those presented in the follo
 
 https://on-demand.gputechconf.com/gtc/2013/presentations/S3274-Synthetic-Aperture-Radar-Backprojection.pdf
 
-There are currently five kernels (i.e. `--kern 1` through `--kern 5`). Briefly, the kernels are as follows:
+There are currently six kernels (i.e. `--kern 1` through `--kern 6`). Briefly, the kernels are as follows:
 
 - 1 - Double precision
 - 2 - Mixed precision
-- 3 - Pre-compute some ranges (in FP64) and store in shared memory. These PF64 computations then do not need to be repeated by each thread.
-- 4 - Incremental phase calculations to reduce the number of FP64 sine/cosine calculations. Newton-Raphson iterations instead of FP64 `sqrt()`.
-- 5 - Single precision
+- 3 - Incremental phase calculations to reduce the number of FP64 sine/cosine calculations
+- 4 - Newton-Raphson iterations instead of FP64 `sqrt()`.
+- 5 - Pre-compute some FP64 range calculations in shared memory to avoid redundant FP64 calculations in threads
+- 6 - Single precision
 
 The performance metric computed by the code is giga backprojections per second. A single backprojection includes the calculations to accumulate the contributions from a single pixel in a single pulse. With an N by N image and P pulses, there are thus `N*N*P` total backprojection operations.
 
 | Kernel  | SER (dB) | Giga Backprojections Per Second |
 | ------------- | ------------- | ------------- |
-| 1 (FP64) | 124.64 | 1.32 |
-| 2 (Mixed) | 81.10 | 1.67 |
-| 3 (smem pre-computations) | 80.96 | 2.55 |
-| 4 (Newton-Raphson + incr. phase calcs) | 82.05 | 5.35 |
-| 5 (single precision) | 13.99 | 69.58
+| 1 (FP64) | 124.70 | 1.63 |
+| 2 (Mixed) | 79.78 | 2.22 |
+| 3 (Incr Phase Calcs) | 82.42 | 3.91 |
+| 4 (Newton-Raphson) | 82.18 | 4.56 |
+| 5 (Smem Range Calcs) | 82.16 | 5.37 |
+| 6 (Single Precision) | 13.86 | 69.58
 
-The RTX 3060 has 1/64th double precision throughput and we can see a ~52x difference between the FP64 and FP32 implementations. However, the SER value for the single precision is likely too low for many tasks, although it is visually still reasonable. The currently implemented optimizations close the performance gap between a version with high accuracy and the FP32 version to about 13x.
+The RTX 3060 has 1/64th double precision throughput and we can see a ~43x difference between the FP64 and FP32 implementations. However, the SER value for the single precision implementation is likely too low for tasks that utilize the phase information of the pixels, although it is visually still reasonable if only using the magnitude image. The currently implemented optimizations close the performance gap between a version with high accuracy and the FP32 version to about 13x.
 
 # Potential Future Work
 

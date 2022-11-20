@@ -98,7 +98,7 @@ void VideoSar::InitCudaBuffers() {
 
     cudaChecked(cudaStreamCreate(&m_stream));
 
-    m_bp.reset(new SarBpGpu(m_num_upsampled_bins));
+    m_bp.reset(new SarBpGpu(m_num_upsampled_bins, n_pulses));
     m_range_upsampling.reset(
         new RangeUpsamplingGpu(m_num_upsampled_bins, n_pulses));
 }

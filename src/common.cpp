@@ -19,10 +19,12 @@ SarGpuKernel IntToSarGpuKernel(int kernel) {
         return SarGpuKernel::DoublePrecision;
     case static_cast<int>(SarGpuKernel::MixedPrecision):
         return SarGpuKernel::MixedPrecision;
-    case static_cast<int>(SarGpuKernel::SmemRange):
-        return SarGpuKernel::SmemRange;
     case static_cast<int>(SarGpuKernel::IncrPhaseLookup):
         return SarGpuKernel::IncrPhaseLookup;
+    case static_cast<int>(SarGpuKernel::NewtonRaphsonTwoIter):
+        return SarGpuKernel::NewtonRaphsonTwoIter;
+    case static_cast<int>(SarGpuKernel::IncrRangeSmem):
+        return SarGpuKernel::IncrRangeSmem;
     case static_cast<int>(SarGpuKernel::SinglePrecision):
         return SarGpuKernel::SinglePrecision;
     default:

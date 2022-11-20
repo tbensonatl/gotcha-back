@@ -14,7 +14,11 @@ class SarBpGpu {
     SarBpGpu(const SarBpGpu &) = delete;
     SarBpGpu &operator=(const SarBpGpu &) = delete;
 
-    SarBpGpu(int num_range_bins);
+    // max_num_pulses is the maximum number of pulses for which Backproject()
+    // will be called; it is used to size a work buffer. A caller can integrate
+    // more than max_num_pulses with multiple calls to Backproject(), each
+    // having at most max_num_pulses pulses.
+    SarBpGpu(int num_range_bins, int max_num_pulses);
     ~SarBpGpu();
 
     // Backproject num_pulses x m_num_range_bins pulses from dev_range_profiles
@@ -32,9 +36,11 @@ class SarBpGpu {
 
   private:
     int m_num_range_bins;
+    int m_max_num_pulses;
 
     // Device buffers
     uint8_t *m_dev_workbuf{nullptr};
+    double *m_dev_range_to_center{nullptr};
 };
 
 #endif // _SAR_BP_GPU_H_
