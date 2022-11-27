@@ -18,7 +18,7 @@ endif()
 string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v -Xcompiler=-Wall -Xcompiler=-Wextra -Xcompiler=-Werror -Xptxas -lineinfo")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas -v -Xcompiler=-Wall -Xcompiler=-Wextra -Xcompiler=-Werror -lineinfo")
 set(COMMON_CXX_FLAGS "-Wall -Wextra -Wswitch-enum -Werror -flto")
 
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O1 ${COMMON_CXX_FLAGS}")

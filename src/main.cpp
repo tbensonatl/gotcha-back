@@ -123,6 +123,7 @@ static void runGpu(std::vector<cuComplex> &image, const ReconParams &params,
     }
 
     cudaChecked(cudaSetDevice(device_id));
+    LOG("Using device ID %d\n", device_id);
 
     Gotcha::Reader reader(params.gotcha_dir);
     const SarReturnCode rc = reader.ReadDataSet(data_set, request);

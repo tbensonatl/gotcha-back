@@ -12,7 +12,8 @@ enum class SarGpuKernel {
     IncrPhaseLookup,
     NewtonRaphsonTwoIter,
     IncrRangeSmem,
-    SinglePrecision
+    TextureSampling,
+    SinglePrecision,
 };
 
 enum class SarReturnCode { Success = 0, InvalidArg, DataReadError };

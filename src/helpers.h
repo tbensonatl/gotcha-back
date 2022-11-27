@@ -22,6 +22,12 @@
         ptr = nullptr;                                                         \
     }
 
+#define FREE_AND_NULL_CUDA_DEVARRAY_ALLOC(ptr)                                 \
+    if (ptr) {                                                                 \
+        cudaFreeArray(ptr);                                                    \
+        ptr = nullptr;                                                         \
+    }
+
 #define FREE_AND_ZERO_CUFFT_HANDLE(handle)                                     \
     if (handle) {                                                              \
         cufftDestroy(handle);                                                  \

@@ -158,6 +158,9 @@ void SarUI::KernelSelectionCallback(Fl_Widget *widget) {
     case static_cast<uintptr_t>(SarGpuKernel::IncrRangeSmem):
         SetSelectedKernel(SarGpuKernel::IncrRangeSmem);
         break;
+    case static_cast<uintptr_t>(SarGpuKernel::TextureSampling):
+        SetSelectedKernel(SarGpuKernel::TextureSampling);
+        break;
     case static_cast<uintptr_t>(SarGpuKernel::SinglePrecision):
         SetSelectedKernel(SarGpuKernel::SinglePrecision);
         break;
@@ -196,7 +199,8 @@ SarUI::SarUI(int width, int height) : m_width(width), m_height(height) {
     m_kernel_menu->add("IncrPhaseLookup (Opt2)", 0, kernel_cb, this);
     m_kernel_menu->add("Newton-Raphson 2 Iter (Opt3)", 0, kernel_cb, this);
     m_kernel_menu->add("IncrRangeSmem (Opt4)", 0, kernel_cb, this);
-    m_kernel_menu->add("SinglePrecision (Opt5)", 0, kernel_cb, this);
+    m_kernel_menu->add("TextureSampling (Opt5)", 0, kernel_cb, this);
+    m_kernel_menu->add("SinglePrecision (Opt6)", 0, kernel_cb, this);
     m_kernel_menu->value(m_kernel_ref_ind);
     m_menu_group->resizable(nullptr);
     m_menu_group->end();

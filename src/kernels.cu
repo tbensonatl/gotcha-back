@@ -24,12 +24,12 @@ __global__ void FftShiftKernel(cuComplex *data, int num_samples,
     }
 }
 
-__device__ double ComputeRangeToPixel(const float3 *ant_pos, int pulse,
-                                      float px, float py, float pz) {
+__device__ inline double ComputeRangeToPixel(const float3 *ant_pos, int pulse,
+                                             float px, float py, float pz) {
     const float3 ap = ant_pos[pulse];
-    const double xdiff = (double)(ap.x - px);
-    const double ydiff = (double)(ap.y - py);
-    const double zdiff = (double)(ap.z - pz);
+    const double xdiff = (double)(ap.x) - px;
+    const double ydiff = (double)(ap.y) - py;
+    const double zdiff = (double)(ap.z) - pz;
     return sqrt(xdiff * xdiff + ydiff * ydiff + zdiff * zdiff);
 }
 
@@ -58,7 +58,6 @@ SarBpKernelDoublePrecision(cuComplex *image, int image_width, int image_height,
     for (int p = 0; p < num_pulses; ++p) {
         const double diffR =
             ComputeRangeToPixel(ant_pos, p, px, py, z0) - range_to_center[p];
-
         const double bin = diffR * dr_inv + bin_offset;
         if (bin >= 0.0f && bin < max_bin_f) {
             const int bin_floor = (int)bin;
@@ -220,9 +219,9 @@ __global__ void SarBpKernelNewtonRaphsonTwoIter(
 
     for (int p = 0; p < num_pulses; ++p) {
         const float3 ap = ant_pos[p];
-        const double xdiff = (double)(ap.x - px);
-        const double ydiff = (double)(ap.y - py);
-        const double zdiff = (double)(ap.z - z0);
+        const double xdiff = (double)(ap.x) - px;
+        const double ydiff = (double)(ap.y) - py;
+        const double zdiff = (double)(ap.z) - z0;
         const double dx2dy2dz2 = xdiff * xdiff + ydiff * ydiff + zdiff * zdiff;
 
         // Newton-Raphson updates to compute distance to the pixel. The second
@@ -302,9 +301,6 @@ __global__ void SarBpKernelIncrRangeSmem(
         return;
     }
 
-    const float py = (image_height / 2.0f - 0.5f - iy) * dy;
-    const float px = (-image_width / 2.0f + 0.5f + ix) * dx;
-
     cuComplex accum = make_cuComplex(0.0, 0.0);
     const double bin_offset = (double)(0.5f * num_range_bins);
     const float max_bin_f = num_range_bins - 2.0f;
@@ -331,9 +327,10 @@ __global__ void SarBpKernelIncrRangeSmem(
         const double diffR = nr_2 - range_to_center[p];
 
         const double bin = (diffR * dr_inv) + bin_offset;
+        // const float bin = (diffR * dr_inv) + bin_offset;
         const float bin_f = (float)bin;
         if (bin_f >= 0.0f && bin_f < max_bin_f) {
-            const int bin_floor = (int)bin;
+            const int bin_floor = (int)bin_f;
             const float w = (float)(bin - (double)bin_floor);
             const int ind_base = p * num_range_bins + bin_floor;
             const cuComplex sample =
@@ -354,11 +351,107 @@ __global__ void SarBpKernelIncrRangeSmem(
 }
 
 __global__ void
+SarBpKernelTextureSampling(cuComplex *image, int image_width, int image_height,
+                           cudaTextureObject_t tex_obj, int pulse_tex_offset,
+                           const double *range_to_center,
+                           const cuComplex *incr_phase_lut, int num_range_bins,
+                           int num_pulses, const float3 *ant_pos,
+                           double phase_correction_partial, double dr_inv,
+                           double dx, double dy, double z0) {
+
+    extern __shared__ double smem_incr_range[];
+
+    cg::thread_block block = cg::this_thread_block();
+
+    const int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const int iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    const float xmid = (-image_width * 0.5f + 0.5f + blockIdx.x * blockDim.x +
+                        blockDim.x * 0.5f) *
+                       dx;
+    const float ymid = (image_height * 0.5f - 0.5f - blockIdx.y * blockDim.y -
+                        blockDim.y * 0.5f) *
+                       dy;
+
+    const int t = threadIdx.y * blockDim.x + threadIdx.x;
+    const int nthreads = blockDim.x * blockDim.y;
+    for (int p = t; p < num_pulses; p += nthreads) {
+        const float3 ap = ant_pos[p];
+        const double apx = ap.x;
+        const double apy = ap.y;
+        const double apz = ap.z;
+        smem_incr_range[p] = apx * apx + apy * apy + apz * apz -
+                             2.0 * xmid * apx + xmid * xmid - 2.0 * ymid * apy +
+                             ymid * ymid - 2.0 * apz * z0 + z0 * z0;
+    }
+
+    if (t == 0) {
+        smem_incr_range[num_pulses] =
+            ComputeRangeToPixel(ant_pos, num_pulses / 2, xmid, ymid, z0);
+        smem_incr_range[num_pulses + 1] =
+            1.0 / (2.0 * smem_incr_range[num_pulses]);
+    }
+
+    block.sync();
+
+    if (ix >= image_width || iy >= image_height) {
+        return;
+    }
+
+    cuComplex accum = make_cuComplex(0.0, 0.0);
+    const double bin_offset = (double)(0.5f * num_range_bins);
+    const float max_bin_f = num_range_bins - 2.0f;
+    const double Rmid = smem_incr_range[num_pulses];
+    const double Rmid_2_inv = smem_incr_range[num_pulses + 1];
+
+    const float xdel = (-image_width / 2.0 + 0.5 + ix) * dx - xmid;
+    const float ydel = (image_height / 2.0 - 0.5 - iy) * dy - ymid;
+    const double dist_adj =
+        2.0 * xmid * xdel + xdel * xdel + 2.0 * ymid * ydel + ydel * ydel;
+
+    float pulse_f = (float)pulse_tex_offset + 0.5f;
+    for (int p = 0; p < num_pulses; ++p) {
+        const float3 ap = ant_pos[p];
+        const double dx2dy2dz2 =
+            smem_incr_range[p] + dist_adj -
+            (double)(2.0f * ap.x * xdel + 2.0f * ap.y * ydel);
+
+        // Newton-Raphson updates to compute distance to the pixel. The second
+        // iteration is approximate because it reuses the denominator for the
+        // first iteration to avoid the double precision division required to
+        // compute 1.0/(2.0*nr_1).
+        const double nr_1 = Rmid - (Rmid * Rmid - dx2dy2dz2) * Rmid_2_inv;
+        const double nr_2 = nr_1 - (nr_1 * nr_1 - dx2dy2dz2) * Rmid_2_inv;
+        const double diffR = nr_2 - range_to_center[p];
+
+        const double bin = (diffR * dr_inv) + bin_offset;
+        // const float bin_f = (float)(diffR * dr_inv) + bin_offset;
+        const float bin_f = (float)bin;
+        if (bin_f >= 0.0f && bin_f < max_bin_f) {
+            const int bin_floor = (int)bin_f;
+            const float w = (float)(bin - (double)bin_floor);
+            const float2 sample = tex2D<float2>(tex_obj, bin_f + 0.5f, pulse_f);
+            float sinx, cosx;
+            const cuComplex first_part = incr_phase_lut[bin_floor];
+            __sincosf(phase_correction_partial * w, &sinx, &cosx);
+            const cuComplex second_part = make_cuComplex(cosx, sinx);
+            accum = cuCfmaf(sample, cuCmulf(first_part, second_part), accum);
+        }
+        pulse_f += 1.0f;
+    }
+
+    const int img_ind = iy * image_width + ix;
+    image[img_ind] = cuCaddf(image[img_ind], accum);
+}
+
+__global__ void
 SarBpKernelSinglePrecision(cuComplex *image, int image_width, int image_height,
-                           const cuComplex *range_profiles, int num_range_bins,
+                           const cuComplex *range_profiles,
+                           const float *range_to_center, int num_range_bins,
                            int num_pulses, const float3 *ant_pos,
                            float phase_correction_partial, float dr_inv,
                            float dx, float dy, float z0) {
+
     const int ix = blockIdx.x * blockDim.x + threadIdx.x;
     const int iy = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -375,28 +468,22 @@ SarBpKernelSinglePrecision(cuComplex *image, int image_width, int image_height,
     for (int p = 0; p < num_pulses; ++p) {
         const int pulse_offset = p * num_range_bins;
         const float3 ap = ant_pos[p];
-        const float apx = ap.x;
-        const float apy = ap.y;
-        const float apz = ap.z;
-        const float range_to_center = sqrtf(apx * apx + apy * apy + apz * apz);
-        const float xdiff = apx - px;
-        const float ydiff = apy - py;
-        const float zdiff = apz - z0;
+        const float xdiff = ap.x - px;
+        const float ydiff = ap.y - py;
+        const float zdiff = ap.z - z0;
         const float diffR =
             sqrtf(xdiff * xdiff + ydiff * ydiff + zdiff * zdiff) -
-            range_to_center;
+            range_to_center[p];
 
         const float bin = diffR * dr_inv + bin_offset;
         if (bin >= 0.0f && bin < max_bin_f) {
             const int bin_floor = (int)bin;
             const float w = (bin - (float)bin_floor);
             const int ind_base = pulse_offset + bin_floor;
-            const cuComplex sample =
-                make_cuComplex((1.0f - w) * range_profiles[ind_base].x +
-                                   w * range_profiles[ind_base + 1].x,
-                               (1.0f - w) * range_profiles[ind_base].y +
-                                   w * range_profiles[ind_base + 1].y);
-
+            const cuComplex rp0 = range_profiles[ind_base];
+            const cuComplex rp1 = range_profiles[ind_base + 1];
+            const cuComplex sample = make_cuComplex(
+                (1.0f - w) * rp0.x + w * rp1.x, (1.0f - w) * rp0.y + w * rp1.y);
             float sinx, cosx;
             __sincosf(phase_correction_partial * diffR, &sinx, &cosx);
             const cuComplex matched_filter = make_cuComplex(cosx, sinx);
@@ -559,7 +646,8 @@ void FftShiftGpu(cuComplex *data, int num_samples, int num_arrays,
 
 static int SelectedKernelPulseBlockSize(SarGpuKernel kernel, int num_pulses) {
     if (kernel == SarGpuKernel::NewtonRaphsonTwoIter ||
-        kernel == SarGpuKernel::IncrRangeSmem) {
+        kernel == SarGpuKernel::IncrRangeSmem ||
+        kernel == SarGpuKernel::TextureSampling) {
         // For the Newton-Raphson based distance calculations to be accurate, we
         // want relatively small pulse blocks so that the center pulse to center
         // pixel range is a good initial estimate of the pulse-to-pixel range
@@ -570,13 +658,12 @@ static int SelectedKernelPulseBlockSize(SarGpuKernel kernel, int num_pulses) {
     return num_pulses;
 }
 
-size_t GetMaxBackprojWorkBufSizeBytes(int num_range_bins) {
-    const size_t incr_phase_lookup_size =
-        sizeof(cuDoubleComplex) * num_range_bins;
-    // Currently, only the IncrPhaseLookup kernel requires a work buffer, but
-    // if we add additional kernels that require work buffers, we should return
-    // the max of them here.
-    return incr_phase_lookup_size;
+size_t GetMaxBackprojWorkBufSizeBytes(int num_range_bins, int max_num_pulses) {
+    const size_t incr_phase_lookup_size = sizeof(cuComplex) * num_range_bins;
+    const size_t range_to_center_vals = sizeof(double) * max_num_pulses;
+    // Since we can change the kernel from one backprojection invocation to the
+    // next, we allocate the worst-case work buffer size
+    return incr_phase_lookup_size + range_to_center_vals;
 }
 
 __global__ void SarBpPopulateIncrPhaseLUT(cuComplex *workbuf,
@@ -617,16 +704,13 @@ __global__ void SarBpPopulateIncrPhaseLUT(cuComplex *workbuf,
 static bool KernelUsesIncrPhaseLUT(SarGpuKernel kernel) {
     switch (kernel) {
     case SarGpuKernel::Invalid:
-        return false;
     case SarGpuKernel::DoublePrecision:
-        return false;
     case SarGpuKernel::MixedPrecision:
         return false;
     case SarGpuKernel::IncrPhaseLookup:
-        return true;
     case SarGpuKernel::NewtonRaphsonTwoIter:
-        return true;
     case SarGpuKernel::IncrRangeSmem:
+    case SarGpuKernel::TextureSampling:
         return true;
     case SarGpuKernel::SinglePrecision:
         return false;
@@ -634,26 +718,38 @@ static bool KernelUsesIncrPhaseLUT(SarGpuKernel kernel) {
     return false;
 }
 
-static bool s_did_init_phase_lut = false;
-static void PopulateBpWorkbuf(uint8_t *bp_workbuf, int num_range_bins,
-                              double freq_min, double dr, SarGpuKernel kernel,
-                              cudaStream_t stream) {
-    if (s_did_init_phase_lut || !KernelUsesIncrPhaseLUT(kernel)) {
-        return;
+static bool KernelNeedsDoubleRange(SarGpuKernel kernel) {
+    switch (kernel) {
+    case SarGpuKernel::Invalid:
+    case SarGpuKernel::DoublePrecision:
+    case SarGpuKernel::MixedPrecision:
+    case SarGpuKernel::IncrPhaseLookup:
+    case SarGpuKernel::NewtonRaphsonTwoIter:
+    case SarGpuKernel::IncrRangeSmem:
+    case SarGpuKernel::TextureSampling:
+        return true;
+    case SarGpuKernel::SinglePrecision:
+        return false;
     }
-
-    const dim3 block(128, 1);
-    const dim3 grid(idivup(num_range_bins, block.x), 1);
-    SarBpPopulateIncrPhaseLUT<<<grid, block, 0, stream>>>(
-        reinterpret_cast<cuComplex *>(bp_workbuf), num_range_bins, freq_min,
-        dr);
-
-    s_did_init_phase_lut = true;
+    return false;
 }
 
-__global__ void ComputeRangeToCenterKernel(double *range_to_center,
-                                           const float3 *ant_pos,
-                                           int num_pulses) {
+static size_t WorkBufIncrPhaseLUTOffset() {
+    // The incremental phase LUT is always the first entry
+    // in the work buffer
+    return 0;
+}
+
+static size_t WorkBufRangeToCenterOffset(int num_range_bins) {
+    // The range to center values are stored after the incremental phase LUT.
+    // The work buffer is a worst-case allocation, so this offset is the same
+    // even if no incremental phase LUT is in use.
+    return sizeof(cuComplex) * num_range_bins;
+}
+
+__global__ void ComputeRangeToCenterKernelF64(double *range_to_center,
+                                              const float3 *ant_pos,
+                                              int num_pulses) {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < num_pulses) {
         const float3 ap = ant_pos[tid];
@@ -664,27 +760,62 @@ __global__ void ComputeRangeToCenterKernel(double *range_to_center,
     }
 }
 
-void ComputeRangeToCenterWrapper(double *dev_range_to_center,
-                                 const float3 *dev_ant_pos, int num_pulses,
-                                 cudaStream_t stream) {
-    const dim3 block(32, 1);
-    const dim3 grid(idivup(num_pulses, block.x), 1);
-    ComputeRangeToCenterKernel<<<grid, block, 0, stream>>>(
-        dev_range_to_center, dev_ant_pos, num_pulses);
+__global__ void ComputeRangeToCenterKernelF32(float *range_to_center,
+                                              const float3 *ant_pos,
+                                              int num_pulses) {
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < num_pulses) {
+        const float3 ap = ant_pos[tid];
+        const float apx = ap.x;
+        const float apy = ap.y;
+        const float apz = ap.z;
+        range_to_center[tid] = sqrtf(apx * apx + apy * apy + apz * apz);
+    }
 }
 
+static bool s_did_init_phase_lut = false;
+static void PopulateBpWorkbuf(uint8_t *bp_workbuf, int num_range_bins,
+                              int num_pulses, const float3 *ant_pos,
+                              double freq_min, double dr, SarGpuKernel kernel,
+                              cudaStream_t stream) {
+    if (!s_did_init_phase_lut && KernelUsesIncrPhaseLUT(kernel)) {
+        const dim3 block(128, 1);
+        const dim3 grid(idivup(num_range_bins, block.x), 1);
+        const size_t lut_offset = WorkBufIncrPhaseLUTOffset();
+        SarBpPopulateIncrPhaseLUT<<<grid, block, 0, stream>>>(
+            reinterpret_cast<cuComplex *>(bp_workbuf + lut_offset),
+            num_range_bins, freq_min, dr);
+
+        s_did_init_phase_lut = true;
+    }
+
+    const size_t range_offset = WorkBufRangeToCenterOffset(num_range_bins);
+    if (KernelNeedsDoubleRange(kernel)) {
+        const dim3 block(32, 1);
+        const dim3 grid(idivup(num_pulses, block.x), 1);
+        ComputeRangeToCenterKernelF64<<<grid, block, 0, stream>>>(
+            reinterpret_cast<double *>(bp_workbuf + range_offset), ant_pos,
+            num_pulses);
+    } else {
+        const dim3 block(128, 1);
+        const dim3 grid(idivup(num_pulses, block.x), 1);
+        ComputeRangeToCenterKernelF32<<<grid, block, 0, stream>>>(
+            reinterpret_cast<float *>(bp_workbuf + range_offset), ant_pos,
+            num_pulses);
+    }
+}
+
+static bool s_did_set_cache_configs = false;
+
 void SarBpGpuWrapper(cuComplex *image, int image_width, int image_height,
-                     const cuComplex *range_profiles,
-                     const double *range_to_center, uint8_t *bp_workbuf,
+                     cudaTextureObject_t tex_obj,
+                     const cuComplex *range_profiles, uint8_t *bp_workbuf,
                      int num_range_bins, int num_pulses, const float3 *ant_pos,
                      double freq_min, double dR, double dx, double dy,
                      double z0, SarGpuKernel kernel, cudaStream_t stream) {
     const dim3 block(16, 16);
     const dim3 grid(idivup(image_width, block.x), idivup(image_height, block.y),
                     1);
-
-    PopulateBpWorkbuf(bp_workbuf, num_range_bins, freq_min, dR, kernel, stream);
-    cudaChecked(cudaGetLastError());
 
     const double c = SPEED_OF_LIGHT_M_PER_SEC;
     // The data has been motion-compenstated so that the origin corresponds
@@ -695,18 +826,35 @@ void SarBpGpuWrapper(cuComplex *image, int image_width, int image_height,
     // Everything except delR is fixed, so we precompute it.
     const double phase_correction_partial = 4.0 * M_PI * (freq_min / c);
 
+    if (!s_did_set_cache_configs) {
+        cudaChecked(cudaFuncSetAttribute(
+            SarBpKernelIncrRangeSmem,
+            cudaFuncAttributePreferredSharedMemoryCarveout, 6));
+        cudaChecked(cudaFuncSetAttribute(
+            SarBpKernelTextureSampling,
+            cudaFuncAttributePreferredSharedMemoryCarveout, 6));
+        s_did_set_cache_configs = true;
+    }
+
+    const uint8_t *range_to_center =
+        bp_workbuf + WorkBufRangeToCenterOffset(num_range_bins);
     const int pulse_block_size =
         SelectedKernelPulseBlockSize(kernel, num_pulses);
     int num_processed_pulses = 0;
     while (num_processed_pulses < num_pulses) {
         const int num_pulses_this_block =
             std::min(num_pulses - num_processed_pulses, pulse_block_size);
+        PopulateBpWorkbuf(bp_workbuf, num_range_bins, num_pulses_this_block,
+                          ant_pos + num_processed_pulses, freq_min, dR, kernel,
+                          stream);
+        cudaChecked(cudaGetLastError());
         switch (kernel) {
         case SarGpuKernel::DoublePrecision:
             SarBpKernelDoublePrecision<<<grid, block, 0, stream>>>(
                 image, image_width, image_height,
                 range_profiles + num_processed_pulses * num_range_bins,
-                range_to_center, num_range_bins, num_pulses_this_block,
+                reinterpret_cast<const double *>(range_to_center),
+                num_range_bins, num_pulses_this_block,
                 ant_pos + num_processed_pulses, phase_correction_partial,
                 1.0 / dR, dx, dy, z0);
             break;
@@ -714,15 +862,16 @@ void SarBpGpuWrapper(cuComplex *image, int image_width, int image_height,
             SarBpKernelMixedPrecision<<<grid, block, 0, stream>>>(
                 image, image_width, image_height,
                 range_profiles + num_processed_pulses * num_range_bins,
-                range_to_center + num_processed_pulses, num_range_bins,
-                num_pulses_this_block, ant_pos + num_processed_pulses,
-                phase_correction_partial, 1.0 / dR, dx, dy, z0);
+                reinterpret_cast<const double *>(range_to_center),
+                num_range_bins, num_pulses_this_block,
+                ant_pos + num_processed_pulses, phase_correction_partial,
+                1.0 / dR, dx, dy, z0);
             break;
         case SarGpuKernel::IncrPhaseLookup: {
             SarBpKernelIncrPhaseLUT<<<grid, block, 0, stream>>>(
                 image, image_width, image_height,
                 range_profiles + num_processed_pulses * num_range_bins,
-                range_to_center + num_processed_pulses,
+                reinterpret_cast<const double *>(range_to_center),
                 reinterpret_cast<cuComplex *>(bp_workbuf), num_range_bins,
                 num_pulses_this_block, ant_pos + num_processed_pulses,
                 phase_correction_partial * dR, 1.0 / dR, dx, dy, z0);
@@ -731,7 +880,7 @@ void SarBpGpuWrapper(cuComplex *image, int image_width, int image_height,
             SarBpKernelNewtonRaphsonTwoIter<<<grid, block, 0, stream>>>(
                 image, image_width, image_height,
                 range_profiles + num_processed_pulses * num_range_bins,
-                range_to_center + num_processed_pulses,
+                reinterpret_cast<const double *>(range_to_center),
                 reinterpret_cast<cuComplex *>(bp_workbuf), num_range_bins,
                 num_pulses_this_block, ant_pos + num_processed_pulses,
                 phase_correction_partial * dR, 1.0 / dR, dx, dy, z0);
@@ -742,7 +891,17 @@ void SarBpGpuWrapper(cuComplex *image, int image_width, int image_height,
             SarBpKernelIncrRangeSmem<<<grid, block, smem_size, stream>>>(
                 image, image_width, image_height,
                 range_profiles + num_processed_pulses * num_range_bins,
-                range_to_center + num_processed_pulses,
+                reinterpret_cast<const double *>(range_to_center),
+                reinterpret_cast<cuComplex *>(bp_workbuf), num_range_bins,
+                num_pulses_this_block, ant_pos + num_processed_pulses,
+                phase_correction_partial * dR, 1.0 / dR, dx, dy, z0);
+        } break;
+        case SarGpuKernel::TextureSampling: {
+            const size_t smem_size =
+                sizeof(double) * (num_pulses_this_block + 2);
+            SarBpKernelTextureSampling<<<grid, block, smem_size, stream>>>(
+                image, image_width, image_height, tex_obj, num_processed_pulses,
+                reinterpret_cast<const double *>(range_to_center),
                 reinterpret_cast<cuComplex *>(bp_workbuf), num_range_bins,
                 num_pulses_this_block, ant_pos + num_processed_pulses,
                 phase_correction_partial * dR, 1.0 / dR, dx, dy, z0);
@@ -751,6 +910,7 @@ void SarBpGpuWrapper(cuComplex *image, int image_width, int image_height,
             SarBpKernelSinglePrecision<<<grid, block, 0, stream>>>(
                 image, image_width, image_height,
                 range_profiles + num_processed_pulses * num_range_bins,
+                reinterpret_cast<const float *>(range_to_center),
                 num_range_bins, num_pulses_this_block,
                 ant_pos + num_processed_pulses, phase_correction_partial,
                 1.0 / dR, dx, dy, z0);

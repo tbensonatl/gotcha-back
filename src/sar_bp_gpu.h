@@ -35,12 +35,15 @@ class SarBpGpu {
                      cudaStream_t stream);
 
   private:
+    bool KernelUsesTextureMemory(SarGpuKernel kernel);
+
     int m_num_range_bins;
     int m_max_num_pulses;
 
     // Device buffers
     uint8_t *m_dev_workbuf{nullptr};
-    double *m_dev_range_to_center{nullptr};
+    cudaArray *m_dev_tex_array{nullptr};
+    cudaTextureObject_t m_tex_obj{0};
 };
 
 #endif // _SAR_BP_GPU_H_

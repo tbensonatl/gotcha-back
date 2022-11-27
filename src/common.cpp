@@ -25,6 +25,8 @@ SarGpuKernel IntToSarGpuKernel(int kernel) {
         return SarGpuKernel::NewtonRaphsonTwoIter;
     case static_cast<int>(SarGpuKernel::IncrRangeSmem):
         return SarGpuKernel::IncrRangeSmem;
+    case static_cast<int>(SarGpuKernel::TextureSampling):
+        return SarGpuKernel::TextureSampling;
     case static_cast<int>(SarGpuKernel::SinglePrecision):
         return SarGpuKernel::SinglePrecision;
     default:

@@ -89,26 +89,31 @@ There are currently six kernels (i.e. `--kern 1` through `--kern 6`). Briefly, t
 - 3 - Incremental phase calculations to reduce the number of FP64 sine/cosine calculations
 - 4 - Newton-Raphson iterations instead of FP64 `sqrt()`.
 - 5 - Pre-compute some FP64 range calculations in shared memory to avoid redundant FP64 calculations in threads
-- 6 - Single precision
+- 6 - Texture sampling for interpolating range profiles
+- 7 - Single precision
 
 The performance metric computed by the code is giga backprojections per second. A single backprojection includes the calculations to accumulate the contributions from a single pixel in a single pulse. With an N by N image and P pulses, there are thus `N*N*P` total backprojection operations.
 
 | Kernel  | SER (dB) | Giga Backprojections Per Second |
 | ------------- | ------------- | ------------- |
-| 1 (FP64) | 124.70 | 1.63 |
-| 2 (Mixed) | 79.78 | 2.22 |
-| 3 (Incr Phase Calcs) | 82.42 | 3.91 |
-| 4 (Newton-Raphson) | 82.18 | 4.56 |
-| 5 (Smem Range Calcs) | 82.16 | 5.37 |
-| 6 (Single Precision) | 13.86 | 69.58
+| 1 (FP64) | 126.27 | 1.42 |
+| 2 (Mixed) | 79.66 | 1.85 |
+| 3 (Incr Phase Calcs) | 83.60 | 3.09 |
+| 4 (Newton-Raphson) | 80.83 | 3.70 |
+| 5 (Smem Range Calcs) | 80.47 | 5.55 |
+| 6 (Texture Sampling) | 73.07 | 5.52 |
+| 7 (Single Precision) | 14.96 | 64.15
 
-The RTX 3060 has 1/64th double precision throughput and we can see a ~43x difference between the FP64 and FP32 implementations. However, the SER value for the single precision implementation is likely too low for tasks that utilize the phase information of the pixels, although it is visually still reasonable if only using the magnitude image. The currently implemented optimizations close the performance gap between a version with high accuracy and the FP32 version to about 13x.
+The RTX 3060 has 1/64th double precision throughput and we can see a ~45x difference between the FP64 and FP32 implementations. However, the SER value for the single precision implementation is likely too low for tasks that utilize the phase information of the pixels, although it is visually still reasonable if only using the magnitude image. The currently implemented optimizations close the performance gap between a version with high accuracy and the FP32 version to about 12x. Using texture sampling in this case did not improve performance, seemingly because the high-precision kernels are already heavily compute-bound due to the double-precision computations.
+
+In general, it is clear that if accurate phase information is required, which in turn requires some double-precision arithmetic, then hardware with higher double-precision throughput is necessary. In practice, that means that the x100 series GPUs are needed (e.g. V100, A100, H100), but no consumer variants of those architectures are available.
 
 # Potential Future Work
 
 There are several items still to be done, including:
 
-- More optimization work on the kernels, including texture-based interpolations, thread coarsening, cache hierarchy optimization, etc.
+- More optimization work on the kernels, including thread coarsening, cache hierarchy optimization, etc.
 - The video SAR mode can also be significantly optimized, especially in the case of subsequent images using partially overlapping pulse ranges. Since multiple passes are available, simultaneously constructing data from multiple passes and performing on-the-fly coherent change detection is also an option.
+- Optimized CPU implementations.
 
 Also, the current data sets are quite small as they are pre-processed to a small scene. If anyone has any large interesting SAR data sets available that they are willing to share, please contact me at tbensongit@gmail.com.
