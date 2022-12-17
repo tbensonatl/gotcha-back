@@ -1,4 +1,8 @@
-cmake_minimum_required(VERSION 3.17 FATAL_ERROR)
+# CMake version 3.23 is needed to default to native CUDA architectures (i.e.
+# architectures for the GPUs installed on the build system). The minimum can be
+# reduced to CMake 3.18 if the user sets the environment variable CUDAARCHS="XY" for
+# their desired architecture XY (e.g. 86 for compute capability 8.6).
+cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 project(sarbp LANGUAGES CUDA CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -13,6 +17,10 @@ set(DEFAULT_BUILD_TYPE "Release")
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to '${DEFAULT_BUILD_TYPE}' because none was specified")
     set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "Choose the build type." FORCE)
+endif()
+
+if (NOT DEFINED ENV{CUDAARCHS})
+    set(CMAKE_CUDA_ARCHITECTURES native)
 endif()
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
@@ -35,7 +43,6 @@ add_library(kernels STATIC
     src/kernels.cu)
 
 set_target_properties(kernels PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-set_target_properties(kernels PROPERTIES CUDA_ARCHITECTURES "86")
 
 set(CPP_SOURCES
     src/common.h
@@ -61,6 +68,5 @@ set(CPP_SOURCES
 
 add_executable(sarbp src/main.cpp ${CPP_SOURCES})
 set_target_properties(sarbp PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-set_target_properties(sarbp PROPERTIES CUDA_ARCHITECTURES "86")
 target_include_directories(sarbp PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES} ${Boost_INCLUDE_DIRS})
 target_link_libraries(sarbp kernels ${Boost_LIBRARIES} CUDA::cufft ${FLTK_LIBRARIES})
