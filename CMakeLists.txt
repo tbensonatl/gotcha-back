@@ -1,8 +1,8 @@
-# CMake version 3.23 is needed to default to native CUDA architectures (i.e.
+# CMake version 3.24 is needed to default to native CUDA architectures (i.e.
 # architectures for the GPUs installed on the build system). The minimum can be
 # reduced to CMake 3.18 if the user sets the environment variable CUDAARCHS="XY" for
 # their desired architecture XY (e.g. 86 for compute capability 8.6).
-cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 project(sarbp LANGUAGES CUDA CXX)
 
 set(CMAKE_CXX_STANDARD 17)

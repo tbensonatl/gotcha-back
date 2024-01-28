@@ -18,7 +18,7 @@ If you would like to discuss the project, please contact the author (Thomas Bens
 
 # Dependencies and Requirements
 
-Dependencies include CMake (3.23+), CUDA, Boost (only the `program_options` library), and FLTK. Note that an NVIDIA GPU is required to run the GPU-based backprojectors (including the video SAR mode). To date, this code has been developed on Ubuntu 22.04 with CUDA 12, although other reasonably new Linux distributions should work as well. For Ubuntu, new versions of CMake are available via Kitware's APT repository (https://apt.kitware.com). The new vesion of CMake is only required to default to building the CUDA kernels for the GPUs installed on the system where the software is being built. The architecture can also be specified explicitly using e.g. `CUDAARCHS=86 make` to build for compute capability 8.6. In that case, the CMake minimum version can be dropped to 3.18.
+Dependencies include CMake (3.24+), CUDA, Boost (only the `program_options` library), and FLTK. Note that an NVIDIA GPU is required to run the GPU-based backprojectors (including the video SAR mode). To date, this code has been developed on Ubuntu 22.04 with CUDA 12, although other reasonably new Linux distributions should work as well. For Ubuntu, new versions of CMake are available via Kitware's APT repository (https://apt.kitware.com). The new vesion of CMake is only required to default to building the CUDA kernels for the GPUs installed on the system where the software is being built. The architecture can also be specified explicitly using e.g. `CUDAARCHS=86 make` to build for compute capability 8.6. In that case, the CMake minimum version can be dropped to 3.18.
 
 # Building the Code
 
@@ -94,15 +94,15 @@ There are currently six kernels (i.e. `--kern 1` through `--kern 6`). Briefly, t
 
 The performance metric computed by the code is giga backprojections per second (GBP/s). A single backprojection includes the calculations to accumulate the contributions from a single pixel in a single pulse. With an N by N image and P pulses, there are thus `N*N*P` total backprojection operations.
 
-| Kernel  | SER (dB) | GBP/s Titan RTX | GBP/s RTX 3060 |
-| ------------- | ------------- | ------------- | ------------- |
-| 1 (FP64) | ~126 | 3.88 | 1.58 |
-| 2 (Mixed) | ~78 | 5.41 | 2.06 |
-| 3 (Incr Phase Calcs) | ~83 | 9.12 | 3.53 |
-| 4 (Newton-Raphson) | ~82 | 10.69 | 4.15 |
-| 5 (Smem Range Calcs) | ~81 | 15.22 | 6.08 |
-| 6 (Texture Sampling) | ~73 | 15.10 | 5.97 |
-| 7 (Single Precision) | ~15 | 80.76 | 71.8 |
+| Kernel               | SER (dB) | GBP/s Titan RTX | GBP/s RTX 3060 |
+| -------------------- | -------- | --------------- | -------------- |
+| 1 (FP64)             | ~126     | 3.88            | 1.58           |
+| 2 (Mixed)            | ~78      | 5.41            | 2.06           |
+| 3 (Incr Phase Calcs) | ~83      | 9.12            | 3.53           |
+| 4 (Newton-Raphson)   | ~82      | 10.69           | 4.15           |
+| 5 (Smem Range Calcs) | ~81      | 15.22           | 6.08           |
+| 6 (Texture Sampling) | ~73      | 15.10           | 5.97           |
+| 7 (Single Precision) | ~15      | 80.76           | 71.8           |
 
 The Titan RTX has 1/32nd double precision throughput relative to single precision throughput whereas the RTX 3060 has 1/64th FP64 relative to FP32. The Titan RTX thus has ~1.3x and ~2.6x higher FP32 and FP64 throughput, respectively, relative to the 3060. The higher FP64 performance of the Titan RTX is very noticeable in all of the kernels that involve FP64 calculations, but the single precision kernel is closer to parity between the two GPUs.
 
