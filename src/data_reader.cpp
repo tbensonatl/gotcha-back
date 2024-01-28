@@ -1,11 +1,14 @@
 #include "data_reader.h"
 #include "helpers.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <vector>
+
+#include <vector_functions.h>
 
 namespace fs = std::filesystem;
 
@@ -464,4 +467,102 @@ Gotcha::Reader::ReadDataSet(struct Gotcha::DataBlock &data_set,
         return SarReturnCode::DataReadError;
     }
     return SarReturnCode::Success;
+}
+
+static void file_closer(FILE *fp) {
+    if (fp) {
+        fclose(fp);
+    }
+}
+
+void SFF::WriteDatasetAsSFF(const char *filename, const Gotcha::DataBlock &data,
+                            bool skip_data) {
+    std::unique_ptr<FILE, decltype(&file_closer)> fp(fopen(filename, "wb"),
+                                                     &file_closer);
+    if (fp.get() == nullptr) {
+        throw std::runtime_error("failed to open output file " +
+                                 std::string(filename));
+    }
+
+    SFF::Header hdr = {};
+    hdr.num_pulses = data.num_pulses;
+    hdr.num_freq = data.num_freq;
+    hdr.min_freq = data.min_freq;
+    hdr.del_freq = data.del_freq;
+    if (!skip_data) {
+        hdr.flags = static_cast<uint32_t>(SFF::Flags::FileHasData);
+    }
+
+    size_t n = fwrite(&hdr, sizeof(SFF::Header), 1, fp.get());
+    if (n != 1) {
+        throw std::runtime_error("failed to write SFF header to " +
+                                 std::string(filename));
+    }
+
+    if (!skip_data) {
+        const size_t nelem = hdr.num_pulses * hdr.num_freq;
+        n = fwrite(data.phase_history.data(), sizeof(float2), nelem, fp.get());
+        if (n != nelem) {
+            throw std::runtime_error("failed to write SFF data to " +
+                                     std::string(filename));
+        }
+    }
+
+    n = fwrite(data.ant_pos.data(), sizeof(float3), hdr.num_pulses, fp.get());
+    if (n != hdr.num_pulses) {
+        throw std::runtime_error("failed to write SFF antenna positions to " +
+                                 std::string(filename));
+    }
+}
+
+void SFF::ReadDataset(Gotcha::DataBlock &data, const char *filename) {
+    std::unique_ptr<FILE, decltype(&file_closer)> fp(fopen(filename, "rb"),
+                                                     &file_closer);
+    if (fp.get() == nullptr) {
+        throw std::runtime_error("failed to open input file " +
+                                 std::string(filename));
+    }
+
+    SFF::Header hdr;
+    size_t n;
+
+    n = fread(&hdr, sizeof(SFF::Header), 1, fp.get());
+    if (n != 1) {
+        throw std::runtime_error("failed to read header from input file " +
+                                 std::string(filename));
+    }
+
+    data.num_pulses = hdr.num_pulses;
+    data.num_freq = hdr.num_freq;
+    data.min_freq = hdr.min_freq;
+    data.del_freq = hdr.del_freq;
+    data.phase_history.resize(data.num_freq * data.num_pulses);
+    data.ant_pos.resize(data.num_pulses);
+
+    if (hdr.flags & static_cast<uint32_t>(SFF::Flags::FileHasData)) {
+        const size_t nelem = data.num_freq * data.num_pulses;
+        n = fread(data.phase_history.data(), sizeof(float2), nelem, fp.get());
+        if (n != nelem) {
+            throw std::runtime_error("failed to read data from input file " +
+                                     std::string(filename));
+        }
+    } else {
+        const float MAX_SCALE = 0.011563f;
+        srand48(123456);
+        srand(1);
+        for (int i = 0; i < data.num_pulses * data.num_freq; i++) {
+            const float s1 = (rand() % 2 == 0) ? 1.0f : -1.0f;
+            const float s2 = (rand() % 2 == 0) ? 1.0f : -1.0f;
+            const float v1 = static_cast<float>(drand48()) * MAX_SCALE;
+            const float v2 = static_cast<float>(drand48()) * MAX_SCALE;
+            data.phase_history[i] = make_float2(s1 * v1, s2 * v2);
+        }
+    }
+
+    n = fread(data.ant_pos.data(), sizeof(float3), data.num_pulses, fp.get());
+    if (n != static_cast<size_t>(data.num_pulses)) {
+        throw std::runtime_error(
+            "failed to read antenna positions from input file " +
+            std::string(filename));
+    }
 }
